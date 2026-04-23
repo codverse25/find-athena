@@ -1,44 +1,48 @@
-export default async function handler(req, res) {
-  const targetPath = req.url.replace(/^\/api\/athena/, "");
-  const targetUrl = `https://apiathena.unira.ac.id/api${targetPath}`;
+export const config = { runtime: "edge" };
 
-  const headers = new Headers();
+export default async (req) => {
+  const url = new URL(req.url);
+  const targetPath = url.pathname.replace("/api/athena", "");
+  const targetUrl = `https://apiathena.unira.ac.id/api${targetPath}${url.search}`;
 
-  // Copy header dari client
-  Object.entries(req.headers).forEach(([key, value]) => {
-    if (!["host", "origin", "referer"].includes(key.toLowerCase())) {
-      headers.set(key, value);
-    }
-  });
+  const modifiedHeaders = new Headers(req.headers);
 
-  // Spoofing header
-  headers.set("Origin", "https://unira.ac.id");
-  headers.set("Referer", "https://unira.ac.id/");
-  headers.set("Host", "apiathena.unira.ac.id");
+  // Hapus header yang akan dipalsukan
+  modifiedHeaders.delete("host");
+  modifiedHeaders.delete("origin");
+  modifiedHeaders.delete("referer");
+
+  // Spoof
+  modifiedHeaders.set("origin", "https://unira.ac.id");
+  modifiedHeaders.set("referer", "https://unira.ac.id/");
+  modifiedHeaders.set("host", "apiathena.unira.ac.id");
 
   try {
     const response = await fetch(targetUrl, {
       method: req.method,
-      headers: headers,
+      headers: modifiedHeaders,
       body:
         req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
     });
 
-    // CORS untuk browser
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET, POST, PUT, DELETE, OPTIONS",
-    );
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization",
-    );
+    const corsHeaders = new Headers(response.headers);
+    corsHeaders.set("access-control-allow-origin", "*");
 
-    res.status(response.status);
-    const data = await response.text();
-    res.send(data);
+    return new Response(response.body, {
+      status: response.status,
+      headers: corsHeaders,
+    });
   } catch (error) {
-    res.status(500).json({ error: "Proxy error", message: error.message });
+    return new Response(
+      JSON.stringify({
+        error: "Proxy error",
+        message: error.message,
+        targetUrl: targetUrl,
+      }),
+      {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      },
+    );
   }
-}
+};
